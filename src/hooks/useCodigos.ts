@@ -55,16 +55,6 @@ export function useCrearCodigoCompleto() {
         const eqId = await obtenerOCrearCodigoPorTexto(params.equivCodigo, params.marcaEquivId)
         if (eqId) {
           await vincularEquivalencia(nuevo.id, eqId)
-          
-          // También registramos el equivalente en el mismo casillero (existencia 0 inicial
-          // para no duplicar el inventario total de la pieza física, pero para que aparezca)
-          if (params.bliId) {
-            await asignar({
-              bli_id: params.bliId,
-              codigo_id: eqId,
-              existencia: 0,
-            })
-          }
         }
       }
 
@@ -129,17 +119,6 @@ export function useActualizarCodigo() {
                 codigo_id: Math.min(params.id, eqId),
                 equivalente_id: Math.max(params.id, eqId)
               })
-              
-              // También lo metemos al mismo casillero (existencia 0) si hay BLI
-              if (params.bliId) {
-                // Removemos previas asignaciones de la equivalencia para simplificar
-                await supabase.from('asignaciones').delete().eq('codigo_id', eqId)
-                await supabase.from('asignaciones').insert({
-                  codigo_id: eqId,
-                  bli_id: params.bliId,
-                  existencia: 0
-                })
-              }
             }
           }
         }
