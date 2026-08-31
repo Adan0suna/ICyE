@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useCodigos, useCrearCodigoCompleto, useActualizarCodigo, useEliminarCodigo } from '@/hooks/useCodigos'
 import Autocomplete from '@/components/Autocomplete'
 import { buscarBli } from '@/api/bli'
+import { supabase } from '@/lib/supabase'
 
 // Prefijo del código → { nombre visible, marca_id en la BD }
 // Si alguna marca nueva entra, se agrega aquí un renglón más.
@@ -28,7 +29,10 @@ export default function CodigosPage() {
   const [bliSel, setBliSel] = useState<{ id: number; control: string } | null>(null)
   const [equivCodigo, setEquivCodigo] = useState('')
   const [editId, setEditId] = useState<number | null>(null)
-  const [editForm, setEditForm] = useState({ codigo: '', activo: true })
+  const [editForm, setEditForm] = useState({ codigo: '', activo: true, existencia: 0 })
+  const [editBliSel, setEditBliSel] = useState<{ id: number; control: string } | null>(null)
+  const [editEquivCodigo, setEditEquivCodigo] = useState('')
+  const [editMarcaEquivDet, setEditMarcaEquivDet] = useState<{ nombre: string; id: number } | null>(null)
 
   function handleCrear(e: React.FormEvent) {
     e.preventDefault()
@@ -48,15 +52,53 @@ export default function CodigosPage() {
     setEquivCodigo('')
   }
 
-  function abrirEdit(row: { id: number; codigo: string; activo: boolean }) {
+  async function abrirEdit(row: any) {
     setEditId(row.id)
-    setEditForm({ codigo: row.codigo, activo: row.activo })
+    setEditForm({ 
+      codigo: row.codigo, 
+      activo: row.activo,
+      existencia: Number(row.existencia) || 0
+    })
+    
+    // Configurar la equivalencia actual
+    const eq = row.equivalencia ? row.equivalencia.split(',')[0].trim() : ''
+    setEditEquivCodigo(eq)
+    setEditMarcaEquivDet(eq ? detectarMarca(eq) : null)
+    
+    // Obtener el ID del BLI actual para pre-cargar el Autocomplete
+    if (row.bli) {
+      const blis = row.bli.split(',').map((b: string) => b.trim())
+      const { data } = await supabase.from('bli').select('id, control').eq('control', blis[0]).single()
+      if (data) {
+        setEditBliSel(data)
+      } else {
+        setEditBliSel(null)
+      }
+    } else {
+      setEditBliSel(null)
+    }
+  }
+
+  function cerrarEdit() {
+    setEditId(null)
+    setEditBliSel(null)
+    setEditEquivCodigo('')
+    setEditMarcaEquivDet(null)
   }
 
   function handleGuardar() {
-    if (!editId) return
-    actualizar.mutate({ id: editId, ...editForm })
-    setEditId(null)
+    if (editId) {
+      actualizar.mutate({ 
+        id: editId, 
+        codigo: editForm.codigo.trim(), 
+        activo: editForm.activo,
+        bliId: editBliSel?.id,
+        existencia: editForm.existencia,
+        equivCodigo: editEquivCodigo.trim(),
+        marcaEquivId: editMarcaEquivDet?.id
+      })
+      cerrarEdit()
+    }
   }
 
   function exportarCSV() {
@@ -231,19 +273,61 @@ export default function CodigosPage() {
 
       {/* EDIT MODAL */}
       {editId !== null && (
-        <div className="overlay" onClick={() => setEditId(null)}>
+        <div className="overlay" onClick={cerrarEdit}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h3>✏️ Editar código</h3>
+            <h3>Editar Código</h3>
             <div className="field">
               <label>Código</label>
               <input type="text" value={editForm.codigo} onChange={e => setEditForm(f => ({ ...f, codigo: e.target.value }))} />
             </div>
-            <label className="checkbox-label">
+            
+            <div className="row-form-1" style={{ marginBottom: '0.5rem' }}>
+              <Autocomplete
+                label="Ubicación (BLI)"
+                placeholder="Ej. 2M-A0000"
+                fetcher={buscarBli}
+                renderItem={(b: { id: number; control: string }) => <span>{b.control}</span>}
+                onSelect={(b) => setEditBliSel(b ? { id: b.id as number, control: (b as any).control } : null)}
+                valueText={editBliSel?.control ?? ''}
+              />
+            </div>
+
+            <div className="row-form" style={{ gridTemplateColumns: '1fr 1fr' }}>
+              <div className="field">
+                <label>Cantidad</label>
+                <input type="number" min="0" value={editForm.existencia} onChange={e => setEditForm(f => ({ ...f, existencia: parseInt(e.target.value) || 0 }))} />
+              </div>
+              <div className="field flex-1" style={{ position: 'relative' }}>
+                <label>Equivalencia</label>
+                <input
+                  type="text"
+                  placeholder="Ej. BOSCH-94"
+                  value={editEquivCodigo}
+                  onChange={e => {
+                    setEditEquivCodigo(e.target.value)
+                    setEditMarcaEquivDet(null)
+                  }}
+                  onBlur={e => setEditMarcaEquivDet(detectarMarca(e.target.value))}
+                />
+                {editMarcaEquivDet && (
+                  <span style={{
+                    position: 'absolute', right: '8px', bottom: '8px',
+                    background: 'var(--accent)', color: '#000',
+                    borderRadius: '4px', padding: '1px 7px',
+                    fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.04em'
+                  }}>
+                    {editMarcaEquivDet.nombre}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <label className="checkbox-label" style={{ marginTop: '0.5rem' }}>
               <input type="checkbox" checked={editForm.activo} onChange={e => setEditForm(f => ({ ...f, activo: e.target.checked }))} />
               Activo
             </label>
             <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={() => setEditId(null)}>Cancelar</button>
+              <button className="btn btn-ghost" onClick={cerrarEdit}>Cancelar</button>
               <button className="btn btn-primary" onClick={handleGuardar} disabled={actualizar.isPending}>
                 {actualizar.isPending ? '⏳' : 'Guardar'}
               </button>

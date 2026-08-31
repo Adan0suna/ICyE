@@ -80,15 +80,76 @@ export function useCrearCodigoCompleto() {
 }
 
 export function useActualizarCodigo() {
-  const qc = useQueryClient()
+  const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, ...input }: { id: number; codigo?: string; descripcion?: string; activo?: boolean }) =>
-      actualizarCodigo(id, input),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['codigos'] })
-      toast.success('Código actualizado')
+    mutationFn: async (params: { 
+      id: number; 
+      codigo: string; 
+      activo: boolean;
+      bliId?: number;
+      existencia?: number;
+      equivCodigo?: string;
+      marcaEquivId?: number;
+    }) => {
+      // 1. Actualizar el código
+      await actualizarCodigo(params.id, {
+        codigo: params.codigo,
+        activo: params.activo,
+      })
+
+      // 2. Si se mandó ubicación/existencia, reemplazamos la asignación
+      if (params.bliId !== undefined && params.existencia !== undefined) {
+        // Borramos asignaciones previas (simplificación para este modal)
+        await supabase.from('asignaciones').delete().eq('codigo_id', params.id)
+        
+        // Creamos la nueva
+        if (params.bliId) {
+          await supabase.from('asignaciones').insert({
+            codigo_id: params.id,
+            bli_id: params.bliId,
+            existencia: params.existencia
+          })
+        }
+      }
+
+      // 3. Si se mandó equivalencia, reemplazamos
+      if (params.equivCodigo !== undefined) {
+        // Borramos las anteriores donde el código actual participe
+        await supabase.from('equivalencias')
+          .delete()
+          .or(`codigo_id.eq.${params.id},equivalente_id.eq.${params.id}`)
+        
+        // Si hay una nueva, la vinculamos
+        if (params.equivCodigo.trim() !== '') {
+          const eqId = await obtenerOCrearCodigoPorTexto(params.equivCodigo, params.marcaEquivId)
+          if (eqId) {
+            // Asegurarnos de que no estemos intentando vincular consigo mismo
+            if (eqId !== params.id) {
+              await supabase.from('equivalencias').insert({
+                codigo_id: Math.min(params.id, eqId),
+                equivalente_id: Math.max(params.id, eqId)
+              })
+              
+              // También lo metemos al mismo casillero (existencia 0) si hay BLI
+              if (params.bliId) {
+                // Removemos previas asignaciones de la equivalencia para simplificar
+                await supabase.from('asignaciones').delete().eq('codigo_id', eqId)
+                await supabase.from('asignaciones').insert({
+                  codigo_id: eqId,
+                  bli_id: params.bliId,
+                  existencia: 0
+                })
+              }
+            }
+          }
+        }
+      }
     },
-    onError: (e) => toast.error(mensajeDeError(e as PostgrestError)),
+    onSuccess: () => {
+      toast.success('Código actualizado')
+      queryClient.invalidateQueries({ queryKey: ['codigos'] })
+    },
+    onError: (err: PostgrestError) => toast.error(mensajeDeError(err)),
   })
 }
 
