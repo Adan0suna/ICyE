@@ -1,9 +1,25 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { PostgrestError } from '@supabase/supabase-js'
-import { crearCodigo, actualizarCodigo, eliminarCodigo } from '@/api/codigos'
+import {
+  crearCodigo,
+  actualizarCodigo,
+  eliminarCodigo,
+  vincularPorTexto,
+  desvincularPorTexto,
+} from '@/api/codigos'
+import { asignar } from '@/api/asignaciones'
 import { mensajeDeError } from '@/lib/errores'
 import { supabase } from '@/lib/supabase'
+
+// Llaves que hay que refrescar después de cualquier cambio. El
+// selector de BLI se alimenta de 'bli-fila': sin invalidarla, una
+// ubicación recién ocupada sigue apareciendo como libre.
+function refrescar(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ['codigos'] })
+  qc.invalidateQueries({ queryKey: ['asignaciones'] })
+  qc.invalidateQueries({ queryKey: ['bli-fila'] })
+}
 
 export function useCodigos() {
   return useQuery({
@@ -19,10 +35,9 @@ export function useCodigos() {
   })
 }
 
-import { asignar } from '@/api/asignaciones'
-
 export function useCrearCodigoCompleto() {
   const qc = useQueryClient()
+
   return useMutation({
     mutationFn: async (params: {
       codigo: string
@@ -33,14 +48,14 @@ export function useCrearCodigoCompleto() {
       equivCodigo?: string
       marcaEquivId?: number
     }) => {
-      // 1. Crear el código
+      // 1. El código
       const nuevo = await crearCodigo({
         codigo: params.codigo,
         descripcion: params.descripcion,
         marca_id: params.marca_id,
       })
 
-      // 2. Si hay BLI, lo asignamos
+      // 2. Su ubicación
       if (params.bliId) {
         await asignar({
           bli_id: params.bliId,
@@ -49,94 +64,96 @@ export function useCrearCodigoCompleto() {
         })
       }
 
-      // 3. Si hay equivalencia, la guardamos SOLO como texto (sin crear código duplicado)
-      if (params.equivCodigo && params.equivCodigo.trim()) {
-        // Primero borramos equivalencias previas de este código
-        await supabase.from('equivalencias')
-          .delete()
-          .or(`codigo_id.eq.${nuevo.id},equivalente_id.eq.${nuevo.id}`)
-        
-        // Guardamos el texto de la equivalencia directamente
-        await supabase.from('equivalencias').insert({
-          codigo_id: nuevo.id,
-          texto_equivalente: params.equivCodigo.trim().toUpperCase()
-        })
+      // 3. Su equivalencia. El código equivalente es un artículo del
+      //    catálogo, no una etiqueta: también se le asigna BLI y
+      //    también lleva piezas.
+      if (params.equivCodigo?.trim()) {
+        await vincularPorTexto(nuevo.id, params.equivCodigo, params.marcaEquivId)
       }
 
       return nuevo
     },
+
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['codigos'] })
-      qc.invalidateQueries({ queryKey: ['asignaciones'] })
-      toast.success('Código registrado exitosamente')
+      refrescar(qc)
+      toast.success('Código registrado')
     },
     onError: (e) => toast.error(mensajeDeError(e as PostgrestError)),
   })
 }
 
 export function useActualizarCodigo() {
-  const queryClient = useQueryClient()
+  const qc = useQueryClient()
+
   return useMutation({
-    mutationFn: async (params: { 
-      id: number; 
-      codigo: string; 
-      activo: boolean;
-      bliId?: number;
-      existencia?: number;
-      equivCodigo?: string;
-      marcaEquivId?: number;
+    mutationFn: async (params: {
+      id: number
+      codigo: string
+      activo: boolean
+      bliId?: number
+      existencia?: number
+      equivCodigo?: string
+      equivOriginal?: string
+      marcaEquivId?: number
     }) => {
-      // 1. Actualizar el código
+      // 1. El código
       await actualizarCodigo(params.id, {
         codigo: params.codigo,
         activo: params.activo,
       })
 
-      // 2. Si se mandó ubicación/existencia, reemplazamos la asignación
+      // 2. La ubicación. Baja lógica de la anterior, nunca delete:
+      //    borrando se pierde el histórico y la auditoría queda
+      //    apuntando a un renglón que ya no existe.
       if (params.bliId !== undefined && params.existencia !== undefined) {
-        // Borramos asignaciones previas (simplificación para este modal)
-        await supabase.from('asignaciones').delete().eq('codigo_id', params.id)
-        
-        // Creamos la nueva
+        const { error } = await supabase
+          .from('asignaciones')
+          .update({ activo: false })
+          .eq('codigo_id', params.id)
+          .eq('activo', true)
+        if (error) throw error
+
         if (params.bliId) {
-          await supabase.from('asignaciones').insert({
+          const { error: eAlta } = await supabase.from('asignaciones').insert({
             codigo_id: params.id,
             bli_id: params.bliId,
-            existencia: params.existencia
+            existencia: params.existencia,
           })
+          if (eAlta) throw eAlta
         }
       }
 
-      // 3. Si se mandó equivalencia, reemplazamos (solo texto, sin crear código duplicado)
-      if (params.equivCodigo !== undefined) {
-        // Borramos las anteriores
-        await supabase.from('equivalencias')
-          .delete()
-          .or(`codigo_id.eq.${params.id},equivalente_id.eq.${params.id}`)
-        
-        // Si hay texto, lo guardamos
-        if (params.equivCodigo.trim() !== '') {
-          await supabase.from('equivalencias').insert({
-            codigo_id: params.id,
-            texto_equivalente: params.equivCodigo.trim().toUpperCase()
-          })
-        }
+      /// 3. Equivalencia. Si el texto cambió, se quita el vínculo anterior
+      //    y se pone el nuevo. Solo ese par: las demás equivalencias del
+      //    código no se tocan.
+      const anterior = (params.equivOriginal ?? '').trim().toUpperCase()
+      const nuevo = (params.equivCodigo ?? '').trim().toUpperCase()
+
+      if (anterior && anterior !== nuevo) {
+        await desvincularPorTexto(params.id, anterior)
       }
+      if (nuevo) {
+        await vincularPorTexto(params.id, nuevo, params.marcaEquivId)
+      }
+
+      return { id: params.id }
     },
+
     onSuccess: () => {
+      refrescar(qc)
       toast.success('Código actualizado')
-      queryClient.invalidateQueries({ queryKey: ['codigos'] })
     },
-    onError: (err: PostgrestError) => toast.error(mensajeDeError(err)),
+    onError: (e) => toast.error(mensajeDeError(e as PostgrestError)),
   })
 }
 
 export function useEliminarCodigo() {
   const qc = useQueryClient()
+
   return useMutation({
     mutationFn: eliminarCodigo,
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['codigos'] })
+      refrescar(qc)
       toast.success('Código desactivado')
     },
     onError: (e) => toast.error(mensajeDeError(e as PostgrestError)),

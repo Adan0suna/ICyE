@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { SelectorBli } from '@/components/SelectorBli'
 import type { BliResumen } from '@/api/bli'
 
+
 // Prefijo del código → { nombre visible, marca_id en la BD }
 // Si alguna marca nueva entra, se agrega aquí un renglón más.
 const PREFIJOS_MARCA: Record<string, { nombre: string; id: number }> = {
@@ -35,6 +36,7 @@ export default function CodigosPage() {
   const [editBliSel, setEditBliSel] = useState<{ id: number; control: string } | null>(null)
   const [editEquivCodigo, setEditEquivCodigo] = useState('')
   const [editMarcaEquivDet, setEditMarcaEquivDet] = useState<{ nombre: string; id: number } | null>(null)
+  const [editEquivOriginal, setEditEquivOriginal] = useState('')
 
 
   function handleCrear(e: React.FormEvent) {
@@ -65,7 +67,8 @@ export default function CodigosPage() {
 
     // Configurar la equivalencia actual
     const eq = row.equivalencia ? row.equivalencia.split(',')[0].trim() : ''
-    setEditEquivCodigo(eq)
+    setEditEquivCodigo(eq)      // lo que se ve y se puede editar
+    setEditEquivOriginal(eq)    // lo que había, para saber qué desvincular
     setEditMarcaEquivDet(eq ? detectarMarca(eq) : null)
 
     // Obtener el ID del BLI actual para pre-cargar el Autocomplete
@@ -86,6 +89,7 @@ export default function CodigosPage() {
     setEditId(null)
     setEditBliSel(null)
     setEditEquivCodigo('')
+    setEditEquivOriginal('')
     setEditMarcaEquivDet(null)
   }
 
@@ -97,6 +101,7 @@ export default function CodigosPage() {
         activo: editForm.activo,
         bliId: editBliSel?.id,
         existencia: editForm.existencia,
+        equivOriginal: editEquivOriginal,
         equivCodigo: editEquivCodigo.trim(),
         marcaEquivId: editMarcaEquivDet?.id
       })
