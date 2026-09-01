@@ -39,7 +39,7 @@ type Props = {
 // Regla de prefijo → marca. Si algún día entra MAHLE u otra,
 // se agrega un renglón aquí. Cuando sean muchas se migra a la BD.
 const PREFIJOS: Record<string, string> = {
-  CA:  'DC',
+  CA: 'DC',
   HGX: 'FRACO',
 };
 
@@ -119,7 +119,7 @@ export function CodigoForm({ abierto, onOpenChange, codigo }: Props) {
       const total = equivalentes.length + delOtro.length + 2;
       const seguir = window.confirm(
         `Los dos códigos ya tienen equivalencias registradas. ` +
-          `Al unirlos quedarán ${total} códigos en un mismo grupo. ¿Continuar?`,
+        `Al unirlos quedarán ${total} códigos en un mismo grupo. ¿Continuar?`,
       );
       if (!seguir) return;
     }

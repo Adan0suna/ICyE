@@ -3,11 +3,13 @@ import { useCodigos, useCrearCodigoCompleto, useActualizarCodigo, useEliminarCod
 import Autocomplete from '@/components/Autocomplete'
 import { buscarBli } from '@/api/bli'
 import { supabase } from '@/lib/supabase'
+import { SelectorBli } from '@/components/SelectorBli'
+import type { BliResumen } from '@/api/bli'
 
 // Prefijo del código → { nombre visible, marca_id en la BD }
 // Si alguna marca nueva entra, se agrega aquí un renglón más.
 const PREFIJOS_MARCA: Record<string, { nombre: string; id: number }> = {
-  CA:  { nombre: 'DC',    id: 1 },
+  CA: { nombre: 'DC', id: 1 },
   HGX: { nombre: 'FRACO', id: 2 },
 }
 
@@ -19,20 +21,21 @@ function detectarMarca(codigo: string) {
 
 export default function CodigosPage() {
   const { data, isLoading, isError } = useCodigos()
-  const crear      = useCrearCodigoCompleto()
+  const crear = useCrearCodigoCompleto()
   const actualizar = useActualizarCodigo()
-  const eliminar   = useEliminarCodigo()
+  const eliminar = useEliminarCodigo()
 
   const [form, setForm] = useState({ codigo: '', existencia: 0 })
   const [marcaDet, setMarcaDet] = useState<{ nombre: string; id: number } | null>(null)
   const [marcaEquivDet, setMarcaEquivDet] = useState<{ nombre: string; id: number } | null>(null)
-  const [bliSel, setBliSel] = useState<{ id: number; control: string } | null>(null)
+  const [bliSel, setBliSel] = useState<BliResumen | null>(null)
   const [equivCodigo, setEquivCodigo] = useState('')
   const [editId, setEditId] = useState<number | null>(null)
   const [editForm, setEditForm] = useState({ codigo: '', activo: true, existencia: 0 })
   const [editBliSel, setEditBliSel] = useState<{ id: number; control: string } | null>(null)
   const [editEquivCodigo, setEditEquivCodigo] = useState('')
   const [editMarcaEquivDet, setEditMarcaEquivDet] = useState<{ nombre: string; id: number } | null>(null)
+
 
   function handleCrear(e: React.FormEvent) {
     e.preventDefault()
@@ -54,17 +57,17 @@ export default function CodigosPage() {
 
   async function abrirEdit(row: any) {
     setEditId(row.id)
-    setEditForm({ 
-      codigo: row.codigo, 
+    setEditForm({
+      codigo: row.codigo,
       activo: row.activo,
       existencia: Number(row.existencia) || 0
     })
-    
+
     // Configurar la equivalencia actual
     const eq = row.equivalencia ? row.equivalencia.split(',')[0].trim() : ''
     setEditEquivCodigo(eq)
     setEditMarcaEquivDet(eq ? detectarMarca(eq) : null)
-    
+
     // Obtener el ID del BLI actual para pre-cargar el Autocomplete
     if (row.bli) {
       const blis = row.bli.split(',').map((b: string) => b.trim())
@@ -88,9 +91,9 @@ export default function CodigosPage() {
 
   function handleGuardar() {
     if (editId) {
-      actualizar.mutate({ 
-        id: editId, 
-        codigo: editForm.codigo.trim(), 
+      actualizar.mutate({
+        id: editId,
+        codigo: editForm.codigo.trim(),
         activo: editForm.activo,
         bliId: editBliSel?.id,
         existencia: editForm.existencia,
@@ -106,7 +109,7 @@ export default function CodigosPage() {
     // id, codigo, equivalencia y el bli, marca, existencia
     const cols = ['id', 'codigo', 'equivalencia', 'bli', 'marca', 'existencia']
     const headers = ['ID', 'CÓDIGO', 'EQUIVALENCIA', 'BLI', 'MARCA', 'EXISTENCIA']
-    
+
     const escape = (v: unknown) => {
       const s = v == null ? '' : String(v)
       return s.includes(',') || s.includes('"') || s.includes('\n')
@@ -118,9 +121,9 @@ export default function CodigosPage() {
       ...data.map(r => cols.map(c => escape((r as any)[c])).join(','))
     ]
     const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' })
-    const url  = URL.createObjectURL(blob)
-    const a    = document.createElement('a')
-    a.href     = url
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
     a.download = `codigos_${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
     URL.revokeObjectURL(url)
@@ -166,14 +169,13 @@ export default function CodigosPage() {
             </div>
           </div>
           <div className="row-form-4">
-            <Autocomplete
-              label="Ubicación (BLI)"
-              placeholder="Ej. 2M-A0000"
-              fetcher={buscarBli}
-              renderItem={(item) => <span>{item.control} <small style={{color:'var(--muted)'}}>({item.estado})</small></span>}
-              onSelect={(item) => setBliSel(item as any)}
-              valueText={bliSel?.control || ''}
-            />
+            <div className="field">
+              <label>Ubicación (BLI)</label>
+              <SelectorBli
+                seleccionado={bliSel}
+                onSeleccionar={(bli) => setBliSel(bli)}
+              />
+            </div>
             <div className="field">
               <label>Cantidad</label>
               <input type="number" min="0" value={form.existencia} onChange={e => setForm(f => ({ ...f, existencia: parseInt(e.target.value) || 0 }))} />
@@ -244,7 +246,7 @@ export default function CodigosPage() {
           <div className="table-wrap">
             <table>
               <thead><tr>
-                <th>Código</th><th>Equivalencia</th><th>BLI</th><th>Marca</th><th>Exist.</th><th style={{textAlign: 'right'}}>Acciones</th>
+                <th>Código</th><th>Equivalencia</th><th>BLI</th><th>Marca</th><th>Exist.</th><th style={{ textAlign: 'right' }}>Acciones</th>
               </tr></thead>
               <tbody>
                 {data?.length === 0 && (
@@ -253,10 +255,10 @@ export default function CodigosPage() {
                 {data?.map(row => (
                   <tr key={row.id}>
                     <td><code className="td-code">{row.codigo}</code></td>
-                    <td className="td-muted"><code style={{fontSize: '0.8rem'}}>{row.equivalencia || '—'}</code></td>
-                    <td><span className="badge" style={{background: 'var(--border)'}}>{row.bli || '—'}</span></td>
+                    <td className="td-muted"><code style={{ fontSize: '0.8rem' }}>{row.equivalencia || '—'}</code></td>
+                    <td><span className="badge" style={{ background: 'var(--border)' }}>{row.bli || '—'}</span></td>
                     <td className="td-muted">{row.marca || '—'}</td>
-                    <td style={{fontWeight: 600}}>{row.existencia}</td>
+                    <td style={{ fontWeight: 600 }}>{row.existencia}</td>
                     <td>
                       <div className="td-actions" style={{ justifyContent: 'flex-end' }}>
                         <button className="btn btn-edit" title="Editar" onClick={() => abrirEdit(row)}>✏️</button>
@@ -280,12 +282,12 @@ export default function CodigosPage() {
               <label>Código</label>
               <input type="text" value={editForm.codigo} onChange={e => setEditForm(f => ({ ...f, codigo: e.target.value }))} />
             </div>
-            
+
             <div className="row-form-1" style={{ marginBottom: '0.5rem' }}>
               <Autocomplete
                 label="Ubicación (BLI)"
                 placeholder="Ej. 2M-A0000"
-                fetcher={buscarBli}
+                fetcher={async (q: string) => (await buscarBli(q)).resultados}
                 renderItem={(b: { id: number; control: string }) => <span>{b.control}</span>}
                 onSelect={(b) => setEditBliSel(b ? { id: b.id as number, control: (b as any).control } : null)}
                 valueText={editBliSel?.control ?? ''}

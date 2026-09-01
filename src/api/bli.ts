@@ -29,6 +29,86 @@ export type UbicacionDeCodigo = {
 const TOPE_BUSQUEDA = 25;
 
 // ------------------------------------------------------------
+// Navegación por cuadrícula
+// Con 500 posiciones la lista desplegable no alcanza y paginarla
+// obliga a pasar 20 páginas para llegar a la fila E. El control
+// ya trae la estructura (casillero, fila, subposición), así que
+// se navega por fila y se pinta la fila completa de una vez.
+// ------------------------------------------------------------
+
+export type Fila = {
+  id: number;
+  clave: string;
+  casillero_id: number;
+  casilleros: { clave: string };
+};
+
+export type BliResumen = {
+  id: number;
+  fila_id: number;
+  subposicion: string;
+  control: string;
+  estado: EstadoBli;
+  codigos: number;
+  existencia: number;
+};
+
+export async function listarFilas(): Promise<Fila[]> {
+  const { data, error } = await supabase
+    .from('filas')
+    .select('id, clave, casillero_id, casilleros!inner(clave)')
+    .eq('activo', true)
+    .order('casillero_id')
+    .order('clave');
+
+  if (error) throw error;
+  return data as unknown as Fila[];
+}
+
+// Las 100 subposiciones de una fila en una sola consulta. Son
+// pocos renglones y evita ir a la base cada vez que se pasa el
+// dedo por la cuadrícula.
+// Igual que obtenerBliPorControl, pero devuelve el resumen completo
+// para poder cambiar de fila y seleccionar en un solo paso.
+export async function obtenerResumenPorControl(
+  control: string,
+): Promise<BliResumen | null> {
+  const { data, error } = await supabase
+    .from('v_bli_resumen')
+    .select('id, fila_id, subposicion, control, estado, codigos, existencia')
+    .eq('control', control.trim().toUpperCase())
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as BliResumen | null;
+}
+
+// Las 500 de un jalón. Son unos pocos kilobytes y permiten pintar
+// el casillero completo sin volver a consultar al cambiar de fila.
+export async function listarResumenCompleto(): Promise<BliResumen[]> {
+  const { data, error } = await supabase
+    .from('v_bli_resumen')
+    .select('id, fila_id, subposicion, control, estado, codigos, existencia')
+    .order('fila_id')
+    .order('subposicion')
+    .limit(2000);
+
+  if (error) throw error;
+  return data as BliResumen[];
+}
+
+export async function listarBliDeFila(filaId: number): Promise<BliResumen[]> {
+  const { data, error } = await supabase
+    .from('v_bli_resumen')
+    .select('id, fila_id, subposicion, control, estado, codigos, existencia')
+    .eq('fila_id', filaId)
+    .order('subposicion');
+
+  if (error) throw error;
+  return data as BliResumen[];
+}
+
+// ------------------------------------------------------------
 // Búsqueda de ubicaciones (alimenta el desplegable)
 // ------------------------------------------------------------
 
