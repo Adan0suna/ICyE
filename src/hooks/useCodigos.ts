@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { PostgrestError } from '@supabase/supabase-js'
-import { crearCodigo, actualizarCodigo, eliminarCodigo, obtenerOCrearCodigoPorTexto } from '@/api/codigos'
+import { crearCodigo, actualizarCodigo, eliminarCodigo } from '@/api/codigos'
 import { mensajeDeError } from '@/lib/errores'
 import { supabase } from '@/lib/supabase'
 
@@ -20,7 +20,6 @@ export function useCodigos() {
 }
 
 import { asignar } from '@/api/asignaciones'
-import { vincularEquivalencia } from '@/api/catalogo'
 
 export function useCrearCodigoCompleto() {
   const qc = useQueryClient()
@@ -50,12 +49,18 @@ export function useCrearCodigoCompleto() {
         })
       }
 
-      // 3. Si hay equivalencia, resolvemos el código y vinculamos
-      if (params.equivCodigo) {
-        const eqId = await obtenerOCrearCodigoPorTexto(params.equivCodigo, params.marcaEquivId)
-        if (eqId) {
-          await vincularEquivalencia(nuevo.id, eqId)
-        }
+      // 3. Si hay equivalencia, la guardamos SOLO como texto (sin crear código duplicado)
+      if (params.equivCodigo && params.equivCodigo.trim()) {
+        // Primero borramos equivalencias previas de este código
+        await supabase.from('equivalencias')
+          .delete()
+          .or(`codigo_id.eq.${nuevo.id},equivalente_id.eq.${nuevo.id}`)
+        
+        // Guardamos el texto de la equivalencia directamente
+        await supabase.from('equivalencias').insert({
+          codigo_id: nuevo.id,
+          texto_equivalente: params.equivCodigo.trim().toUpperCase()
+        })
       }
 
       return nuevo
@@ -102,25 +107,19 @@ export function useActualizarCodigo() {
         }
       }
 
-      // 3. Si se mandó equivalencia, reemplazamos
+      // 3. Si se mandó equivalencia, reemplazamos (solo texto, sin crear código duplicado)
       if (params.equivCodigo !== undefined) {
-        // Borramos las anteriores donde el código actual participe
+        // Borramos las anteriores
         await supabase.from('equivalencias')
           .delete()
           .or(`codigo_id.eq.${params.id},equivalente_id.eq.${params.id}`)
         
-        // Si hay una nueva, la vinculamos
+        // Si hay texto, lo guardamos
         if (params.equivCodigo.trim() !== '') {
-          const eqId = await obtenerOCrearCodigoPorTexto(params.equivCodigo, params.marcaEquivId)
-          if (eqId) {
-            // Asegurarnos de que no estemos intentando vincular consigo mismo
-            if (eqId !== params.id) {
-              await supabase.from('equivalencias').insert({
-                codigo_id: Math.min(params.id, eqId),
-                equivalente_id: Math.max(params.id, eqId)
-              })
-            }
-          }
+          await supabase.from('equivalencias').insert({
+            codigo_id: params.id,
+            texto_equivalente: params.equivCodigo.trim().toUpperCase()
+          })
         }
       }
     },
