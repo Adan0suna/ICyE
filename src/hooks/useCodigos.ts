@@ -28,7 +28,8 @@ export function useCodigos() {
       const { data, error } = await supabase
         .from('v_codigos_export')
         .select('*')
-        .order('id', { ascending: true })
+        .order('id', { ascending: false })
+        .limit(25)
       if (error) throw error
       return data
     },
